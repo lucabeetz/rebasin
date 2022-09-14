@@ -1,4 +1,7 @@
 data
+wandb
+artifacts
 
 .ipynb_checkpoints
 .vscode
+__pycache__

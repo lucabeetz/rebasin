@@ -1,18 +1,20 @@
 import jax
 import optax
+import wandb
+import pickle
 import haiku as hk
 import jax.numpy as jnp
 import numpy as np
-import torchvision.transforms as transforms
 from typing import NamedTuple, Tuple
 from tqdm import tqdm
-from torch.utils.data import DataLoader
-from torchvision.datasets import MNIST
+from utils import get_mnist_dataloader
 
-BATCH_SIZE = 1024
-MAX_EPOCHS = 50
-NUM_CLASSES = 10
 LEARNING_RATE = 0.1
+BATCH_SIZE = 1024
+MAX_EPOCHS = 25
+RANDOM_SEED = 1
+
+NUM_CLASSES = 10
 
 
 class MNISTBatch(NamedTuple):
@@ -26,6 +28,7 @@ class TrainingState(NamedTuple):
 
 
 def mlp_fn(images: jnp.ndarray):
+    """MLP with three hidden layers"""
     mlp = hk.Sequential([
         hk.Flatten(),
         hk.Linear(512), jax.nn.relu,
@@ -37,18 +40,23 @@ def mlp_fn(images: jnp.ndarray):
     return mlp(images)
 
 
-def get_mnist_dataloader(train: bool = True) -> DataLoader:
-    mnist_data = MNIST('./data', download=True, train=train, transform=transforms.ToTensor())
-    data_loader = DataLoader(mnist_data, batch_size=BATCH_SIZE, shuffle=True)
-    return data_loader
-
-
 def main():
-    train_dataloader = get_mnist_dataloader()
-    test_dataloader = get_mnist_dataloader(train=False)
+    # Save run config to wandb
+    config = {
+        'learning_rate': LEARNING_RATE,
+        'batch_size': BATCH_SIZE,
+        'max_epochs': MAX_EPOCHS,
+        'seed': RANDOM_SEED
+    }
+    wandb.init(project='rebasin', config=config)
 
+    train_dataloader = get_mnist_dataloader(batch_size=BATCH_SIZE)
+    test_dataloader = get_mnist_dataloader(batch_size=BATCH_SIZE, train=False)
+
+    # Create the model
     network = hk.without_apply_rng(hk.transform(mlp_fn))
 
+    # Create learning rate schedule and optimiser
     lr_schedule = optax.warmup_cosine_decay_schedule(
         init_value=1e-6,
         peak_value=LEARNING_RATE,
@@ -82,8 +90,9 @@ def main():
 
         return TrainingState(params, opt_state), loss
 
+    # Initialise parameters and optimiser state
     images, labels = next(iter(train_dataloader))
-    initial_params = network.init(jax.random.PRNGKey(42), np.array(images))
+    initial_params = network.init(jax.random.PRNGKey(RANDOM_SEED), np.array(images))
     initial_opt_state = optimiser.init(initial_params)
     state = TrainingState(initial_params, initial_opt_state)
 
@@ -96,14 +105,33 @@ def main():
             state, loss = update(state, mnist_batch)
             train_losses.append(loss)
 
-        # Testing loop
+        train_loss = np.mean(train_losses)
+
+        # Evaluate model on test set
         test_accs = []
         for images, labels in test_dataloader:
             mnist_batch = MNISTBatch(np.array(images), np.array(labels))
             acc = evaluate(state.params, mnist_batch)
             test_accs.append(acc)
 
-        pbar.set_description(f"Epoch: {epoch}, train/loss: {np.mean(train_losses):.2f}, test/acc: {np.mean(test_accs):.2f}")
+        test_acc = np.mean(test_accs)
+
+        # Update progress bar
+        pbar.set_description(f"Epoch: {epoch}, train/loss: {train_loss:.2f}, test/acc: {test_acc:.2f}")
+
+        # Log metrics to wandb
+        wandb.log({
+            'epoch': epoch,
+            'train/loss': train_loss,
+            'test/acc': test_acc,
+        })
+
+    # Save params as artifact to wandb
+    params = jax.device_get(state.params)
+    artifact = wandb.Artifact('mnist_mlp_weights', type='model_weights')
+    with artifact.new_file(f'checkpoint_{epoch}_{RANDOM_SEED}.pkl', mode='wb') as f:
+        pickle.dump(params, f)
+    wandb.log_artifact(artifact)
 
 
 if __name__ == '__main__':
