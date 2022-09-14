@@ -1,26 +1,29 @@
 import jax
 import optax
-import torch
 import haiku as hk
 import jax.numpy as jnp
 import numpy as np
-import torchvision
 import torchvision.transforms as transforms
-from typing import Iterator, NamedTuple, Tuple
+from typing import NamedTuple, Tuple
 from tqdm import tqdm
+from torch.utils.data import DataLoader
+from torchvision.datasets import MNIST
 
 BATCH_SIZE = 1024
 MAX_EPOCHS = 50
 NUM_CLASSES = 10
 LEARNING_RATE = 0.1
 
+
 class MNISTBatch(NamedTuple):
     images: np.ndarray
     labels: np.ndarray
 
+
 class TrainingState(NamedTuple):
     params: hk.Params
     opt_state: optax.OptState
+
 
 def mlp_fn(images: jnp.ndarray):
     mlp = hk.Sequential([
@@ -33,10 +36,12 @@ def mlp_fn(images: jnp.ndarray):
 
     return mlp(images)
 
-def get_mnist_dataloader(train: bool = True) -> torch.utils.data.DataLoader:
-    mnist_data = torchvision.datasets.MNIST('./data', download=True, train=train, transform=transforms.ToTensor())
-    data_loader = torch.utils.data.DataLoader(mnist_data, batch_size=BATCH_SIZE, shuffle=True)
+
+def get_mnist_dataloader(train: bool = True) -> DataLoader:
+    mnist_data = MNIST('./data', download=True, train=train, transform=transforms.ToTensor())
+    data_loader = DataLoader(mnist_data, batch_size=BATCH_SIZE, shuffle=True)
     return data_loader
+
 
 def main():
     train_dataloader = get_mnist_dataloader()
@@ -44,7 +49,12 @@ def main():
 
     network = hk.without_apply_rng(hk.transform(mlp_fn))
 
-    lr_schedule = optax.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=LEARNING_RATE, warmup_steps=10, decay_steps=len(train_dataloader.dataset) * MAX_EPOCHS)
+    lr_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=1e-6,
+        peak_value=LEARNING_RATE,
+        warmup_steps=10,
+        decay_steps=len(train_dataloader.dataset) * MAX_EPOCHS
+    )
     optimiser = optax.sgd(lr_schedule, momentum=0.9)
 
     def loss_fn(params: hk.Params, batch: MNISTBatch) -> jnp.ndarray:
@@ -72,7 +82,6 @@ def main():
 
         return TrainingState(params, opt_state), loss
 
-
     images, labels = next(iter(train_dataloader))
     initial_params = network.init(jax.random.PRNGKey(42), np.array(images))
     initial_opt_state = optimiser.init(initial_params)
@@ -95,6 +104,7 @@ def main():
             test_accs.append(acc)
 
         pbar.set_description(f"Epoch: {epoch}, train/loss: {np.mean(train_losses):.2f}, test/acc: {np.mean(test_accs):.2f}")
+
 
 if __name__ == '__main__':
     main()
