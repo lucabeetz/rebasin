@@ -10,9 +10,9 @@ from typing import Iterator, NamedTuple, Tuple
 from tqdm import tqdm
 
 BATCH_SIZE = 1024
-MAX_EPOCHS = 25
+MAX_EPOCHS = 50
 NUM_CLASSES = 10
-LEARNING_RATE = 0.01
+LEARNING_RATE = 0.1
 
 class MNISTBatch(NamedTuple):
     images: np.ndarray
@@ -33,14 +33,19 @@ def mlp_fn(images: jnp.ndarray):
 
     return mlp(images)
 
-def get_mnist_dataloader(train: bool = True) -> Iterator[MNISTBatch]:
+def get_mnist_dataloader(train: bool = True) -> torch.utils.data.DataLoader:
     mnist_data = torchvision.datasets.MNIST('./data', download=True, train=train, transform=transforms.ToTensor())
     data_loader = torch.utils.data.DataLoader(mnist_data, batch_size=BATCH_SIZE, shuffle=True)
     return data_loader
 
 def main():
+    train_dataloader = get_mnist_dataloader()
+    test_dataloader = get_mnist_dataloader(train=False)
+
     network = hk.without_apply_rng(hk.transform(mlp_fn))
-    optimiser = optax.sgd(LEARNING_RATE)
+
+    lr_schedule = optax.warmup_cosine_decay_schedule(init_value=1e-6, peak_value=LEARNING_RATE, warmup_steps=10, decay_steps=len(train_dataloader.dataset) * MAX_EPOCHS)
+    optimiser = optax.sgd(lr_schedule, momentum=0.9)
 
     def loss_fn(params: hk.Params, batch: MNISTBatch) -> jnp.ndarray:
         """Cross-entropy classification loss"""
@@ -67,10 +72,8 @@ def main():
 
         return TrainingState(params, opt_state), loss
 
-    train_dataset = get_mnist_dataloader()
-    test_dataset = get_mnist_dataloader(train=False)
 
-    images, labels = next(iter(train_dataset))
+    images, labels = next(iter(train_dataloader))
     initial_params = network.init(jax.random.PRNGKey(42), np.array(images))
     initial_opt_state = optimiser.init(initial_params)
     state = TrainingState(initial_params, initial_opt_state)
@@ -79,14 +82,14 @@ def main():
     for epoch in pbar:
         # Training loop
         train_losses = []
-        for images, labels in train_dataset:
+        for images, labels in train_dataloader:
             mnist_batch = MNISTBatch(np.array(images), np.array(labels))
             state, loss = update(state, mnist_batch)
             train_losses.append(loss)
 
         # Testing loop
         test_accs = []
-        for images, labels in test_dataset:
+        for images, labels in test_dataloader:
             mnist_batch = MNISTBatch(np.array(images), np.array(labels))
             acc = evaluate(state.params, mnist_batch)
             test_accs.append(acc)
