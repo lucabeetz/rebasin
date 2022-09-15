@@ -5,20 +5,13 @@ import haiku as hk
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from utils import lerp_params, get_mnist_dataloader
+from utils import lerp_params, get_mnist_dataloader, load_params
 from mlp import BATCH_SIZE, mlp_fn, MNISTBatch
 
 MODEL_A = 0
 MODEL_B = 0
 
 BATCH_SIZE = 1024
-
-
-def load_params(filepath: str):
-    """Load model parameters from a file"""
-    with open(filepath, 'rb') as f:
-        params = pickle.load(f)
-    return jax.device_put(params)
 
 
 def main():

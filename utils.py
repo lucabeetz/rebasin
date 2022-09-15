@@ -19,7 +19,7 @@ def lerp_params(alpha, params_a, params_b) -> hk.Params:
     return tree_map(lambda a, b: (1 - alpha) * a + alpha * b, params_a, params_b)
 
 
-def load_params_from_file(filepath: str):
+def load_params(filepath: str):
     """Load model parameters from a file"""
     with open(filepath, 'rb') as f:
         params = pickle.load(f)
