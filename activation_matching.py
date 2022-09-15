@@ -89,31 +89,39 @@ def main():
         preds = jnp.argmax(logits, axis=-1)
         return jnp.mean(preds == batch.labels)
 
-    alpha_test_accs = []
-    alphas = jnp.linspace(0, 1, 50)
     test_dataloader = get_mnist_dataloader(batch_size=1_000, train=False)
 
-    # Evaluate model while interpolating between params_a and params_b
-    for alpha in tqdm(alphas):
-        params = lerp_params(alpha, params_a, permuted_params)
+    alpha_naive_accs = []
+    alpha_perm_accs = []
+    alphas = jnp.linspace(0, 1, 50)
 
-        test_accs = []
+    # Evaluate model on naive and matched permutations
+    for alpha in tqdm(alphas):
+        naive_params = lerp_params(alpha, params_a, params_b)
+        perm_params = lerp_params(alpha, params_a, permuted_params)
+
+        naive_accs = []
+        perm_accs = []
         for images, labels in test_dataloader:
             mnist_batch = MNISTBatch(np.array(images), np.array(labels))
-            test_acc = evaluate(params, mnist_batch)
-            test_accs.append(test_acc)
 
-        alpha_test_accs.append(np.mean(test_accs))
+            naive_accs.append(evaluate(naive_params, mnist_batch))
+            perm_accs.append(evaluate(perm_params, mnist_batch))
 
+        alpha_naive_accs.append(np.mean(naive_accs))
+        alpha_perm_accs.append(np.mean(perm_accs))
+
+    # Plot accuracies
     fig = plt.figure()
     ax = fig.add_subplot(111)
-    ax.plot(alphas, alpha_test_accs, label='test')
+    ax.plot(alphas, alpha_naive_accs, label='naive')
+    ax.plot(alphas, alpha_perm_accs, label='activation matching')
     ax.set_ylabel('Accuracy')
     ax.set_xlabel('$\\alpha$')
     ax.set_xticks([0, 1])
     ax.set_xticklabels(['Model $A$', 'Model $B$'])
     ax.legend()
-    ax.set_title("MNIST MLP Accuracy Interpolation")
+    ax.set_title("MNIST MLP Test Accuracy")
 
     plt.savefig('graphs/interpolate_mlp_activations.png', dpi=300)
 
